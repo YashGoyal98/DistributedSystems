@@ -56,11 +56,9 @@ const (
 // Your code here -- RPC handlers for the worker to call.
 func (c *Coordinator) RequestTask(args *WorkerArgs, reply *WorkerReply) error {
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	log.Printf("dekh dekh : mapf : %v ,,,, reducef : %v", c.mMapTasks, c.nReduceTasks)
 	task := Task{}
 	if c.mMapTasks > 0 {
-		kvraft.DPrintf("Map task started")
 		if len(c.mapTasks) != 0 {
 			task = Task{
 				WorkerId: args.WorkerId,
@@ -74,11 +72,15 @@ func (c *Coordinator) RequestTask(args *WorkerArgs, reply *WorkerReply) error {
 				c.mapTasks = c.mapTasks[1:]
 			}
 			reply.Task = task
-			go c.monitorTask(task)
-			return nil
+
+		} else {
+			task = Task{
+				WorkerId: args.WorkerId,
+				TaskType: NoTask,
+			}
+			reply.Task = task
 		}
 	} else if c.nReduceTasks > 0 {
-		kvraft.DPrintf("Reduce task started")
 		if len(c.reduceTasks) != 0 {
 			task = Task{
 				WorkerId: args.WorkerId,
@@ -92,10 +94,15 @@ func (c *Coordinator) RequestTask(args *WorkerArgs, reply *WorkerReply) error {
 				c.reduceTasks = c.reduceTasks[1:]
 			}
 			reply.Task = task
-			go c.monitorTask(task)
-			return nil
+		} else {
+			task = Task{
+				WorkerId: args.WorkerId,
+				TaskType: NoTask,
+			}
+			reply.Task = task
 		}
-	} else if c.mMapTasks == 0 && c.nReduceTasks == 0 {
+	} else {
+
 		task = Task{
 			WorkerId: args.WorkerId,
 			TaskType: ExitTask,
@@ -103,46 +110,56 @@ func (c *Coordinator) RequestTask(args *WorkerArgs, reply *WorkerReply) error {
 			TaskId:   strconv.Itoa(0),
 		}
 		reply.Task = task
-		return nil
 	}
-
+	c.mu.Unlock()
+	go c.monitorTask(task)
 	return nil
 }
 
 func (c *Coordinator) monitorTask(task Task) {
-	time.Sleep(time.Second * workerTimeout)
 	c.mu.Lock()
+	time.Sleep(time.Second * workerTimeout)
 	defer c.mu.Unlock()
+	kvraft.DPrintf("hrtr i sm")
 	if task.TaskType == MapTask && !mapTaskSet.Has(task.TaskId) {
 		task.TaskStatus = Idle
+		task.WorkerId = -1
 		c.mapTasks = append(c.mapTasks, task)
 		c.mMapTasks++
 	} else if task.TaskType == ReduceTask && !reduceTaskSet.Has(task.TaskId) {
 		task.TaskStatus = Idle
+		task.WorkerId = -1
 		c.reduceTasks = append(c.reduceTasks, task)
 		c.nReduceTasks++
 
 	}
 }
 func (c *Coordinator) ReportTask(args *ReportTaskArgs, reply *ReportTaskReply) error {
+	time.After(workerTimeout * time.Second)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	if args.TaskType == MapTask {
-		c.mMapTasks--
-		mapTaskSet.Insert(args.TaskId)
-		log.Printf("dhak dhak %v-%v\n", c.mMapTasks, len(c.mapTasks))
-		reply.CanExit = true
-		return nil
+		if !mapTaskSet.Has(args.TaskId) {
+			c.mMapTasks--
+			mapTaskSet.Insert(args.TaskId)
+			log.Printf("dhak dhak %v-%v\n", c.mMapTasks, len(c.mapTasks))
+			reply.CanExit = true
+			return nil
+		}
 	} else if args.TaskType == ReduceTask {
-		c.nReduceTasks--
-		reduceTaskSet.Insert(args.TaskId)
-		reply.CanExit = true
-		return nil
+		if !mapTaskSet.Has(args.TaskId) {
+			c.nReduceTasks--
+			reduceTaskSet.Insert(args.TaskId)
+			reply.CanExit = true
+			return nil
+
+		}
 	} else {
 		fmt.Printf("Incorrect task type to report: %v\n", args.TaskType)
 		reply.CanExit = false
 		return nil
 	}
+	return nil
 }
 
 // an example RPC handler.

@@ -1,8 +1,6 @@
 package mr
 
 import (
-	"6.824/kvraft"
-	"bufio"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
@@ -55,6 +53,9 @@ func Worker(mapf func(string, string) []KeyValue,
 			} else if reply.Task.TaskType == ExitTask {
 				fmt.Println("All tasks are done, worker exiting.")
 				return
+			} else if reply.Task.TaskType == NoTask {
+				time.Sleep(TaskInterval * time.Millisecond)
+				continue
 			}
 
 		} else {
@@ -98,8 +99,7 @@ func processReduceTask(task Task, reducef func(string, []string) string) {
 		fmt.Printf("Error: %v opening Filename Reduce : %v", err, fileName)
 	}
 	defer file.Close()
-	buf := bufio.NewReader(file)
-	dec := json.NewDecoder(buf)
+	dec := json.NewDecoder(file)
 	var kva []KeyValue
 	for {
 		var kv KeyValue
@@ -110,7 +110,6 @@ func processReduceTask(task Task, reducef func(string, []string) string) {
 	}
 	sort.Sort(ByKey(kva))
 	writeReducedOutput(kva, task.TaskId, reducef)
-	kvraft.DPrintf("Completed reduce task : %v after writing to output file", task.TaskId)
 	reportTask(task)
 }
 
@@ -183,7 +182,6 @@ func mapWriteToTemp(kva []KeyValue, mapId int) {
 
 	files := make([]*os.File, 0, nReduce)
 	encoders := make([]*json.Encoder, 0, nReduce)
-	buffers := make([]*bufio.Writer, 0, nReduce)
 	prefix := fmt.Sprintf("%v/mr", TempDir)
 
 	for i := 0; i < nReduce; i++ {
@@ -195,10 +193,8 @@ func mapWriteToTemp(kva []KeyValue, mapId int) {
 			fmt.Println(err)
 			return
 		}
-		buf := bufio.NewWriter(file)
 		files = append(files, file)
-		buffers = append(buffers, buf)
-		encoders = append(encoders, json.NewEncoder(buf))
+		encoders = append(encoders, json.NewEncoder(files[i]))
 
 	}
 
@@ -210,11 +206,11 @@ func mapWriteToTemp(kva []KeyValue, mapId int) {
 		}
 	}
 
-	for i, buffer := range buffers {
-		if err := buffer.Flush(); err != nil {
-			log.Fatalf("Error : %v during flushing : %v", err, files[i].Name())
-		}
-	}
+	//for i, buffer := range buffers {
+	//	if err := buffer.Flush(); err != nil {
+	//		log.Fatalf("Error : %v during flushing : %v", err, files[i].Name())
+	//	}
+	//}
 
 	for _, file := range files {
 		err := file.Close()
@@ -243,11 +239,6 @@ func openFileAppendOrCreate(filePath string) (*os.File, error) {
 func call(rpcname string, args interface{}, reply interface{}) bool {
 	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
 	sockname := coordinatorSock()
-	if _, err := os.Stat(sockname); os.IsNotExist(err) {
-		log.Printf("Socket file %s was not created\n", sockname)
-	} else {
-		log.Printf("Socket file %s created successfully\n", sockname)
-	}
 	c, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
 		log.Fatal("dialing:", err)
