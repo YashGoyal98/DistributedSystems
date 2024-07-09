@@ -88,6 +88,8 @@ wait $pid
 # since workers are required to exit when a job is completely finished,
 # and not before, that means the job has finished.
 sort mr-out* | grep . > mr-wc-all
+open mr-wc-all
+open mr-correct-wc.txt
 if cmp mr-wc-all mr-correct-wc.txt
 then
   echo '---' wc test: PASS
