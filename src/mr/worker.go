@@ -3,6 +3,8 @@ package mr
 import (
 	"encoding/json"
 	"fmt"
+	"github.com/google/uuid"
+	"io"
 	"io/ioutil"
 	"os"
 	"sort"
@@ -50,7 +52,6 @@ func Worker(mapf func(string, string) []KeyValue,
 		//workerArgs defined here
 		sem <- struct{}{}
 		wg.Add(1)
-
 		go Helper(taskID, &wg, sem)
 		taskID++
 
@@ -59,6 +60,7 @@ func Worker(mapf func(string, string) []KeyValue,
 			//
 			reply.Task.TaskStatus = In_Progress
 			if reply.Task.TaskType == MapTask {
+
 				processMapTask(reply.Task, mapf)
 			} else if reply.Task.TaskType == ReduceTask {
 				processReduceTask(reply.Task, reducef)
@@ -90,7 +92,7 @@ func Helper(id int, wg *sync.WaitGroup, sem chan struct{}) {
 }
 
 func requestTask() (*WorkerReply, bool) {
-	args := WorkerArgs{os.Getpid()}
+	args := WorkerArgs{uuid.NewString()}
 	reply := WorkerReply{}
 	ok := call("Coordinator.RequestTask", &args, &reply)
 
@@ -177,7 +179,7 @@ func processMapTask(task Task, mapf func(string, string) []KeyValue) {
 	}
 	file.Close()
 	kva := mapf(filename, string(content))
-	mapWriteToTemp(kva, task.WorkerId)
+	mapWriteToTemp(kva)
 	log.Printf("worker : %v completed map task successsfully\n", task.WorkerId)
 	reportTask(task)
 
@@ -196,7 +198,16 @@ func reportTask(task Task) {
 			log.Printf("worker : %v reported %v task successsfully\n", task.WorkerId, task.TaskId)
 
 		} else {
-			log.Fatal("Failure in reporting Map task\n")
+			if args.TaskType == MapTask {
+				log.Printf("assffsfsfsfsfsfbajfaafjafs %v", task.WorkerId)
+				removeMappedFiles()
+				return
+			} else if args.TaskType == ReduceTask {
+				return
+			} else {
+				log.Fatal("Failure in reporting Map task\n")
+			}
+
 		}
 
 	} else {
@@ -204,9 +215,21 @@ func reportTask(task Task) {
 	}
 }
 
-func mapWriteToTemp(kva []KeyValue, mapId int) {
+func removeMappedFiles() {
+	prefix := fmt.Sprintf("%v/mr", TempDir)
+	for i := 0; i < nReduce; i++ {
+		filePath := prefix + "-i"
+		os.Remove(filePath)
+		copyFilePath := filePath + "-Copy"
+		os.Rename(copyFilePath, filePath)
+	}
+	return
+}
+
+func mapWriteToTemp(kva []KeyValue) {
 
 	files := make([]*os.File, 0, nReduce)
+	filesCopy := make([]*os.File, 0, nReduce)
 	encoders := make([]*json.Encoder, 0, nReduce)
 	prefix := fmt.Sprintf("%v/mr", TempDir)
 
@@ -214,12 +237,21 @@ func mapWriteToTemp(kva []KeyValue, mapId int) {
 
 		newFilePath := fmt.Sprintf("%v-%v", prefix, i)
 		file, err := openFileAppendOrCreate(newFilePath)
-		if err != nil {
+		newFilePathCopy := newFilePath + "-Copy"
+		fileCopy, newErr := os.Create(newFilePathCopy)
+
+		if err != nil || newErr != nil {
 			fmt.Printf("Cannot create file %v due to : \n ", i)
-			fmt.Println(err)
+			fmt.Printf("err ;% v", err)
+			fmt.Printf("copyerr ;% v", newErr)
 			return
 		}
+		_, err = io.Copy(fileCopy, file)
+		if err != nil {
+			_ = fmt.Errorf("failed to copy file content: %v", err)
+		}
 		files = append(files, file)
+		filesCopy = append(filesCopy, fileCopy)
 		encoders = append(encoders, json.NewEncoder(files[i]))
 
 	}

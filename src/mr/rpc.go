@@ -26,7 +26,7 @@ type ExampleReply struct {
 
 // Add your RPC definitions here.
 type WorkerArgs struct {
-	WorkerId int
+	WorkerId string
 }
 
 type WorkerReply struct {
@@ -39,7 +39,7 @@ type GetReduceCountReply struct {
 	ReduceCount int
 }
 type ReportTaskArgs struct {
-	WorkerId   int
+	WorkerId   string
 	TaskType   TaskType
 	TaskStatus WorkerStatus
 	TaskId     int

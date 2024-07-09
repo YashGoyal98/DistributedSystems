@@ -27,7 +27,7 @@ const workerTimeout = 10
 const TempDir = "tmp"
 
 type Task struct {
-	WorkerId   int
+	WorkerId   string
 	TaskType   TaskType
 	TaskStatus WorkerStatus
 	Filename   string
@@ -53,6 +53,7 @@ func (c *Coordinator) RequestTask(args *WorkerArgs, reply *WorkerReply) error {
 	c.mu.Lock()
 	log.Printf("dekh dekh : mapf : %v %v,,,, reducef : %v %v", c.mMapTasks, len(c.mapTasks), c.nReduceTasks, len(c.reduceTasks))
 	task := Task{}
+	task.WorkerId = args.WorkerId
 	if c.mMapTasks > 0 {
 		task = getTask(c.mapTasks)
 		reply.Task = task
@@ -90,12 +91,33 @@ func (c *Coordinator) monitorTask(task Task) {
 	defer c.mu.Unlock()
 
 	if task.TaskType == MapTask && c.mapTasks[task.TaskId].TaskStatus == In_Progress {
+		log.Printf("dhoom machale dhoom : %v", task)
 		c.mapTasks[task.TaskId].TaskStatus = Idle
-		task.WorkerId = -1
+		task.WorkerId = ""
 	} else if task.TaskType == ReduceTask && c.reduceTasks[task.TaskId].TaskStatus == In_Progress {
+		log.Printf("dhoom machale dhoom : %v", task)
 		c.reduceTasks[task.TaskId].TaskStatus = Idle
-		task.WorkerId = -1
+		task.WorkerId = ""
 	}
+}
+
+func (c *Coordinator) checkIfNewWorkerAssigned(args *ReportTaskArgs, reply *ReportTaskReply) error {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if args.TaskType == MapTask {
+		if c.mapTasks[args.TaskId].WorkerId != args.WorkerId {
+			reply.CanExit = true
+			return nil
+		}
+	}
+	if args.TaskType == ReduceTask {
+		if c.reduceTasks[args.TaskId].WorkerId != args.WorkerId {
+			reply.CanExit = true
+			return nil
+		}
+	}
+	reply.CanExit = false
+	return nil
 }
 func (c *Coordinator) ReportTask(args *ReportTaskArgs, reply *ReportTaskReply) error {
 
@@ -107,7 +129,7 @@ func (c *Coordinator) ReportTask(args *ReportTaskArgs, reply *ReportTaskReply) e
 			c.mMapTasks--
 			c.mapTasks[args.TaskId].TaskStatus = Completed
 		}
-		reply.CanExit = true
+		reply.CanExit = c.mapTasks[args.TaskId].WorkerId == args.WorkerId
 		return nil
 
 	} else if args.TaskType == ReduceTask {
@@ -115,7 +137,7 @@ func (c *Coordinator) ReportTask(args *ReportTaskArgs, reply *ReportTaskReply) e
 			c.nReduceTasks--
 			c.reduceTasks[args.TaskId].TaskStatus = Completed
 		}
-		reply.CanExit = true
+		reply.CanExit = c.reduceTasks[args.TaskId].WorkerId == args.WorkerId
 		return nil
 	} else {
 		fmt.Printf("Incorrect task type to report: %v\n", args.TaskType)
