@@ -74,6 +74,7 @@ func (c *Coordinator) RequestTask(args *WorkerArgs, reply *WorkerReply) error {
 			reply.Task = task
 
 		} else {
+			log.Printf("hera hera")
 			task = Task{
 				WorkerId: args.WorkerId,
 				TaskType: NoTask,
@@ -81,6 +82,7 @@ func (c *Coordinator) RequestTask(args *WorkerArgs, reply *WorkerReply) error {
 			reply.Task = task
 		}
 	} else if c.nReduceTasks > 0 {
+
 		if len(c.reduceTasks) != 0 {
 			task = Task{
 				WorkerId: args.WorkerId,
@@ -94,12 +96,16 @@ func (c *Coordinator) RequestTask(args *WorkerArgs, reply *WorkerReply) error {
 				c.reduceTasks = c.reduceTasks[1:]
 			}
 			reply.Task = task
+			return nil
 		} else {
+			log.Printf("hera hera reduce")
 			task = Task{
 				WorkerId: args.WorkerId,
 				TaskType: NoTask,
 			}
 			reply.Task = task
+			c.mu.Unlock()
+			return nil
 		}
 	} else {
 
@@ -117,43 +123,50 @@ func (c *Coordinator) RequestTask(args *WorkerArgs, reply *WorkerReply) error {
 }
 
 func (c *Coordinator) monitorTask(task Task) {
-	c.mu.Lock()
 	time.Sleep(time.Second * workerTimeout)
+	c.mu.Lock()
 	defer c.mu.Unlock()
-	kvraft.DPrintf("hrtr i sm")
+
 	if task.TaskType == MapTask && !mapTaskSet.Has(task.TaskId) {
 		task.TaskStatus = Idle
 		task.WorkerId = -1
+		kvraft.DPrintf("hrtr i sm map")
 		c.mapTasks = append(c.mapTasks, task)
 		c.mMapTasks++
 	} else if task.TaskType == ReduceTask && !reduceTaskSet.Has(task.TaskId) {
 		task.TaskStatus = Idle
 		task.WorkerId = -1
+		kvraft.DPrintf("hrtr i sm reduce")
 		c.reduceTasks = append(c.reduceTasks, task)
 		c.nReduceTasks++
 
 	}
 }
 func (c *Coordinator) ReportTask(args *ReportTaskArgs, reply *ReportTaskReply) error {
-	time.After(workerTimeout * time.Second)
+	log.Printf("hera hera reduce6")
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	log.Printf("hera hera reduce7")
+	log.Printf("dekh dekh : TaskType reported : %v ", args.TaskType)
 	if args.TaskType == MapTask {
 		if !mapTaskSet.Has(args.TaskId) {
 			c.mMapTasks--
 			mapTaskSet.Insert(args.TaskId)
 			log.Printf("dhak dhak %v-%v\n", c.mMapTasks, len(c.mapTasks))
-			reply.CanExit = true
-			return nil
-		}
-	} else if args.TaskType == ReduceTask {
-		if !mapTaskSet.Has(args.TaskId) {
-			c.nReduceTasks--
-			reduceTaskSet.Insert(args.TaskId)
-			reply.CanExit = true
-			return nil
 
 		}
+		reply.CanExit = true
+		return nil
+	} else if args.TaskType == ReduceTask {
+		if !reduceTaskSet.Has(args.TaskId) {
+			c.nReduceTasks--
+			reduceTaskSet.Insert(args.TaskId)
+			log.Printf("dhak dhak redyce %v-%v\n", c.nReduceTasks, len(c.reduceTasks))
+			reply.CanExit = true
+
+		}
+		reply.CanExit = true
+		return nil
 	} else {
 		fmt.Printf("Incorrect task type to report: %v\n", args.TaskType)
 		reply.CanExit = false

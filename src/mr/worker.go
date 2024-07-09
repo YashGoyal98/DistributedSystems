@@ -20,7 +20,7 @@ type KeyValue struct {
 
 var nReduce int
 
-const TaskInterval = 500
+const TaskInterval = 200
 
 var maxWorkers = 2
 
@@ -49,6 +49,7 @@ func Worker(mapf func(string, string) []KeyValue,
 			if reply.Task.TaskType == MapTask {
 				processMapTask(reply.Task, mapf)
 			} else if reply.Task.TaskType == ReduceTask {
+				log.Printf("hera hera reduce")
 				processReduceTask(reply.Task, reducef)
 			} else if reply.Task.TaskType == ExitTask {
 				fmt.Println("All tasks are done, worker exiting.")
@@ -92,6 +93,7 @@ func processExitTask(task Task) {
 }
 
 func processReduceTask(task Task, reducef func(string, []string) string) {
+	log.Printf("hera hera reduce2")
 	prefix := fmt.Sprintf("%v/mr", TempDir)
 	fileName := fmt.Sprintf("%v-%v", prefix, task.TaskId)
 	file, err := os.Open(fileName)
@@ -109,7 +111,9 @@ func processReduceTask(task Task, reducef func(string, []string) string) {
 		kva = append(kva, kv)
 	}
 	sort.Sort(ByKey(kva))
+	log.Printf("hera hera reduce3")
 	writeReducedOutput(kva, task.TaskId, reducef)
+	log.Printf("hera hera reduce4")
 	reportTask(task)
 }
 
@@ -164,7 +168,9 @@ func reportTask(task Task) {
 	args.TaskId = task.TaskId
 	args.TaskType = task.TaskType
 	reply := ReportTaskReply{}
+	log.Printf("hera hera reduce5")
 	ok := call("Coordinator.ReportTask", &args, &reply)
+	log.Printf("hera hera reduce6")
 	if ok {
 		if reply.CanExit {
 			log.Printf("worker : %v reported %v task successsfully\n", task.WorkerId, task.TaskId)
@@ -238,13 +244,14 @@ func openFileAppendOrCreate(filePath string) (*os.File, error) {
 // returns false if something goes wrong.
 func call(rpcname string, args interface{}, reply interface{}) bool {
 	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
+	log.Printf("hera hera reduce5.3")
 	sockname := coordinatorSock()
 	c, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
 		log.Fatal("dialing:", err)
 	}
 	defer c.Close()
-
+	log.Printf("hera hera reduce5.4")
 	err = c.Call(rpcname, args, reply)
 	if err == nil {
 		return true
