@@ -3,7 +3,6 @@ package mr
 import (
 	"6.824/kvraft"
 	"fmt"
-	"github.com/golang-collections/collections/set"
 	"log"
 	"path/filepath"
 	"strconv"
@@ -17,26 +16,22 @@ import "net/http"
 
 type Coordinator struct {
 	// Your definitions here.
-	mu             sync.Mutex
-	nReduceTasks   int
-	mMapTasks      int
-	mapTasks       []Task
-	reduceTasks    []Task
-	tasksCompleted bool
+	mu           sync.Mutex
+	nReduceTasks int
+	mMapTasks    int
+	mapTasks     []Task
+	reduceTasks  []Task
 }
 
 const workerTimeout = 10
 const TempDir = "tmp"
-
-var mapTaskSet = set.New()
-var reduceTaskSet = set.New()
 
 type Task struct {
 	WorkerId   int
 	TaskType   TaskType
 	TaskStatus WorkerStatus
 	Filename   string
-	TaskId     string
+	TaskId     int
 }
 type TaskType int
 type WorkerStatus int
@@ -56,63 +51,22 @@ const (
 // Your code here -- RPC handlers for the worker to call.
 func (c *Coordinator) RequestTask(args *WorkerArgs, reply *WorkerReply) error {
 	c.mu.Lock()
-	log.Printf("dekh dekh : mapf : %v ,,,, reducef : %v", c.mMapTasks, c.nReduceTasks)
+	log.Printf("dekh dekh : mapf : %v %v,,,, reducef : %v %v", c.mMapTasks, len(c.mapTasks), c.nReduceTasks, len(c.reduceTasks))
 	task := Task{}
 	if c.mMapTasks > 0 {
-		if len(c.mapTasks) != 0 {
-			task = Task{
-				WorkerId: args.WorkerId,
-				TaskType: MapTask,
-				Filename: c.mapTasks[0].Filename,
-				TaskId:   c.mapTasks[0].TaskId,
-			}
-			if len(c.mapTasks) == 1 {
-				c.mapTasks = nil
-			} else {
-				c.mapTasks = c.mapTasks[1:]
-			}
-			reply.Task = task
-
-		} else {
-			log.Printf("hera hera")
-			task = Task{
-				WorkerId: args.WorkerId,
-				TaskType: NoTask,
-			}
-			reply.Task = task
-		}
+		task = getTask(c.mapTasks)
+		reply.Task = task
+		c.mapTasks[task.TaskId].TaskStatus = In_Progress
 	} else if c.nReduceTasks > 0 {
-
-		if len(c.reduceTasks) != 0 {
-			task = Task{
-				WorkerId: args.WorkerId,
-				TaskType: ReduceTask,
-				Filename: c.reduceTasks[0].Filename,
-				TaskId:   c.reduceTasks[0].TaskId,
-			}
-			if len(c.reduceTasks) == 1 {
-				c.reduceTasks = nil
-			} else {
-				c.reduceTasks = c.reduceTasks[1:]
-			}
-			reply.Task = task
-		} else {
-			log.Printf("hera hera reduce")
-			task = Task{
-				WorkerId: args.WorkerId,
-				TaskType: NoTask,
-			}
-			reply.Task = task
-			c.mu.Unlock()
-			return nil
-		}
+		task = getTask(c.reduceTasks)
+		reply.Task = task
+		c.reduceTasks[task.TaskId].TaskStatus = In_Progress
 	} else {
-
 		task = Task{
 			WorkerId: args.WorkerId,
 			TaskType: ExitTask,
 			Filename: "",
-			TaskId:   strconv.Itoa(0),
+			TaskId:   0,
 		}
 		reply.Task = task
 	}
@@ -121,46 +75,45 @@ func (c *Coordinator) RequestTask(args *WorkerArgs, reply *WorkerReply) error {
 	return nil
 }
 
+func getTask(tasks []Task) Task {
+	for i := 0; i < len(tasks); i++ {
+		if tasks[i].TaskStatus == Idle {
+			return tasks[i]
+		}
+	}
+	return Task{TaskType: NoTask}
+}
+
 func (c *Coordinator) monitorTask(task Task) {
 	time.Sleep(time.Second * workerTimeout)
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if task.TaskType == MapTask && !mapTaskSet.Has(task.TaskId) {
-		task.TaskStatus = Idle
+	if task.TaskType == MapTask && c.mapTasks[task.TaskId].TaskStatus == In_Progress {
+		c.mapTasks[task.TaskId].TaskStatus = Idle
 		task.WorkerId = -1
-		kvraft.DPrintf("hrtr i sm map")
-		c.mapTasks = append(c.mapTasks, task)
-		c.mMapTasks++
-	} else if task.TaskType == ReduceTask && !reduceTaskSet.Has(task.TaskId) {
-		task.TaskStatus = Idle
+	} else if task.TaskType == ReduceTask && c.reduceTasks[task.TaskId].TaskStatus == In_Progress {
+		c.reduceTasks[task.TaskId].TaskStatus = Idle
 		task.WorkerId = -1
-		kvraft.DPrintf("hrtr i sm reduce")
-		c.reduceTasks = append(c.reduceTasks, task)
-		c.nReduceTasks++
-
 	}
 }
 func (c *Coordinator) ReportTask(args *ReportTaskArgs, reply *ReportTaskReply) error {
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	//log.Printf("halla bol %v %v", args.TaskStatus, c.mapTasks[args.TaskId].TaskStatus)
 	if args.TaskType == MapTask {
-		if !mapTaskSet.Has(args.TaskId) {
+		if c.mapTasks[args.TaskId].TaskStatus == In_Progress {
 			c.mMapTasks--
-			mapTaskSet.Insert(args.TaskId)
-			log.Printf("dhak dhak %v-%v\n", c.mMapTasks, len(c.mapTasks))
-
+			c.mapTasks[args.TaskId].TaskStatus = Completed
 		}
 		reply.CanExit = true
 		return nil
-	} else if args.TaskType == ReduceTask {
-		if !reduceTaskSet.Has(args.TaskId) {
-			c.nReduceTasks--
-			reduceTaskSet.Insert(args.TaskId)
-			log.Printf("dhak dhak redyce %v-%v\n", c.nReduceTasks, len(c.reduceTasks))
-			reply.CanExit = true
 
+	} else if args.TaskType == ReduceTask {
+		if c.reduceTasks[args.TaskId].TaskStatus == In_Progress {
+			c.nReduceTasks--
+			c.reduceTasks[args.TaskId].TaskStatus = Completed
 		}
 		reply.CanExit = true
 		return nil
@@ -229,12 +182,11 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	c.nReduceTasks = nReduce
 	c.mMapTasks = len(files)
 	kvraft.DPrintf("note it %v-%v", nReduce, c.mMapTasks)
-	c.tasksCompleted = false
 	for i := 0; i < len(files); i++ {
-		c.mapTasks = append(c.mapTasks, Task{Filename: files[i], TaskType: MapTask, TaskId: strconv.Itoa(i)})
+		c.mapTasks = append(c.mapTasks, Task{Filename: files[i], TaskType: MapTask, TaskId: i})
 	}
 	for i := 0; i < nReduce; i++ {
-		c.reduceTasks = append(c.reduceTasks, Task{Filename: strconv.Itoa(i), TaskType: ReduceTask, TaskId: strconv.Itoa(i)})
+		c.reduceTasks = append(c.reduceTasks, Task{Filename: strconv.Itoa(i), TaskType: ReduceTask, TaskId: i})
 	}
 	c.server()
 	outFiles, _ := filepath.Glob("mr-out*")

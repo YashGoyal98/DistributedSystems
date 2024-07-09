@@ -6,6 +6,7 @@ import (
 	"io/ioutil"
 	"os"
 	"sort"
+	"sync"
 	"time"
 )
 import "log"
@@ -39,9 +40,20 @@ func Worker(mapf func(string, string) []KeyValue,
 	getReduceCount()
 
 	// Your worker implementation here.
+	var wg sync.WaitGroup
 
+	// Buffered channel with a capacity of 2 to limit to 2 concurrent goroutines
+	sem := make(chan struct{}, 2)
+
+	taskID := 0
 	for {
 		//workerArgs defined here
+		sem <- struct{}{}
+		wg.Add(1)
+
+		go Helper(taskID, &wg, sem)
+		taskID++
+
 		reply, ok := requestTask()
 		if ok {
 			//
@@ -65,6 +77,18 @@ func Worker(mapf func(string, string) []KeyValue,
 		time.Sleep(TaskInterval * time.Millisecond)
 	}
 }
+
+func Helper(id int, wg *sync.WaitGroup, sem chan struct{}) {
+	defer wg.Done()
+
+	// Simulate work
+	time.Sleep(2 * time.Second)
+	fmt.Printf("Worker %d finished work\n", id)
+
+	// Release the semaphore
+	<-sem
+}
+
 func requestTask() (*WorkerReply, bool) {
 	args := WorkerArgs{os.Getpid()}
 	reply := WorkerReply{}
@@ -92,7 +116,7 @@ func processExitTask(task Task) {
 }
 
 func processReduceTask(task Task, reducef func(string, []string) string) {
-	log.Printf("hera hera reduce2")
+
 	prefix := fmt.Sprintf("%v/mr", TempDir)
 	fileName := fmt.Sprintf("%v-%v", prefix, task.TaskId)
 	file, err := os.Open(fileName)
@@ -114,7 +138,7 @@ func processReduceTask(task Task, reducef func(string, []string) string) {
 	reportTask(task)
 }
 
-func writeReducedOutput(kva []KeyValue, taskId string, reducef func(string, []string) string) {
+func writeReducedOutput(kva []KeyValue, taskId int, reducef func(string, []string) string) {
 	oname := fmt.Sprintf("mr-out-%v", taskId)
 	ofile, _ := os.Create(oname)
 	defer ofile.Close()
@@ -164,6 +188,7 @@ func reportTask(task Task) {
 	args.WorkerId = task.WorkerId
 	args.TaskId = task.TaskId
 	args.TaskType = task.TaskType
+	args.TaskStatus = task.TaskStatus
 	reply := ReportTaskReply{}
 	ok := call("Coordinator.ReportTask", &args, &reply)
 	if ok {
@@ -239,14 +264,13 @@ func openFileAppendOrCreate(filePath string) (*os.File, error) {
 // returns false if something goes wrong.
 func call(rpcname string, args interface{}, reply interface{}) bool {
 	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
-	log.Printf("hera hera reduce5.3")
+
 	sockname := coordinatorSock()
 	c, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
 		log.Fatal("dialing:", err)
 	}
 	defer c.Close()
-	log.Printf("hera hera reduce5.4")
 	err = c.Call(rpcname, args, reply)
 	if err == nil {
 		return true
