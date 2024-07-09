@@ -96,7 +96,6 @@ func (c *Coordinator) RequestTask(args *WorkerArgs, reply *WorkerReply) error {
 				c.reduceTasks = c.reduceTasks[1:]
 			}
 			reply.Task = task
-			return nil
 		} else {
 			log.Printf("hera hera reduce")
 			task = Task{
@@ -143,11 +142,9 @@ func (c *Coordinator) monitorTask(task Task) {
 	}
 }
 func (c *Coordinator) ReportTask(args *ReportTaskArgs, reply *ReportTaskReply) error {
-	log.Printf("hera hera reduce6")
+
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	log.Printf("hera hera reduce7")
-	log.Printf("dekh dekh : TaskType reported : %v ", args.TaskType)
 	if args.TaskType == MapTask {
 		if !mapTaskSet.Has(args.TaskId) {
 			c.mMapTasks--
@@ -172,7 +169,6 @@ func (c *Coordinator) ReportTask(args *ReportTaskArgs, reply *ReportTaskReply) e
 		reply.CanExit = false
 		return nil
 	}
-	return nil
 }
 
 // an example RPC handler.

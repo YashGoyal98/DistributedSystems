@@ -49,7 +49,6 @@ func Worker(mapf func(string, string) []KeyValue,
 			if reply.Task.TaskType == MapTask {
 				processMapTask(reply.Task, mapf)
 			} else if reply.Task.TaskType == ReduceTask {
-				log.Printf("hera hera reduce")
 				processReduceTask(reply.Task, reducef)
 			} else if reply.Task.TaskType == ExitTask {
 				fmt.Println("All tasks are done, worker exiting.")
@@ -111,9 +110,7 @@ func processReduceTask(task Task, reducef func(string, []string) string) {
 		kva = append(kva, kv)
 	}
 	sort.Sort(ByKey(kva))
-	log.Printf("hera hera reduce3")
 	writeReducedOutput(kva, task.TaskId, reducef)
-	log.Printf("hera hera reduce4")
 	reportTask(task)
 }
 
@@ -168,9 +165,7 @@ func reportTask(task Task) {
 	args.TaskId = task.TaskId
 	args.TaskType = task.TaskType
 	reply := ReportTaskReply{}
-	log.Printf("hera hera reduce5")
 	ok := call("Coordinator.ReportTask", &args, &reply)
-	log.Printf("hera hera reduce6")
 	if ok {
 		if reply.CanExit {
 			log.Printf("worker : %v reported %v task successsfully\n", task.WorkerId, task.TaskId)
