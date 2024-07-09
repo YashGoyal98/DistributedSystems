@@ -22,8 +22,7 @@ type KeyValue struct {
 
 var nReduce int
 
-const TaskInterval = 200
-const TempDir = "/var/tmp"
+const TaskInterval = 500
 
 var maxWorkers = 2
 
@@ -44,11 +43,33 @@ func Worker(mapf func(string, string) []KeyValue,
 	// Your worker implementation here.
 
 	for {
-		if requestAndProcessTask(os.Getpid(), mapf, reducef) {
-			time.Sleep(TaskInterval * time.Millisecond)
+		//workerArgs defined here
+		reply, ok := requestTask()
+		if ok {
+			//
+			reply.Task.TaskStatus = In_Progress
+			if reply.Task.TaskType == MapTask {
+				processMapTask(reply.Task, mapf)
+			} else if reply.Task.TaskType == ReduceTask {
+				processReduceTask(reply.Task, reducef)
+			} else if reply.Task.TaskType == ExitTask {
+				fmt.Println("All tasks are done, worker exiting.")
+				return
+			}
+
+		} else {
+			fmt.Println("Failed to contact coordinator, worker exiting.")
 			return
 		}
+		time.Sleep(TaskInterval * time.Millisecond)
 	}
+}
+func requestTask() (*WorkerReply, bool) {
+	args := WorkerArgs{os.Getpid()}
+	reply := WorkerReply{}
+	ok := call("Coordinator.RequestTask", &args, &reply)
+
+	return &reply, ok
 }
 
 // uncomment to send the Example RPC to the coordinator.
@@ -63,36 +84,6 @@ func getReduceCount() {
 	} else {
 		log.Fatalf("Unable to get Reduce Count\n")
 	}
-}
-func requestAndProcessTask(workerId int, mapf func(string, string) []KeyValue,
-	reducef func(string, []string) string) bool {
-	args := WorkerArgs{}
-	args.WorkerId = workerId
-	reply := WorkerReply{}
-	kvraft.DPrintf("here2")
-	//workerArgs defined here
-	ok := call("Coordinator.RequestTask", &args, &reply)
-	log.Printf("%v", reply.Task)
-	if ok {
-		//
-		reply.Task.TaskStatus = In_Progress
-		if reply.Task.TaskType == MapTask {
-			processMapTask(reply.Task, mapf)
-			return true
-		} else if reply.Task.TaskType == ReduceTask {
-			processReduceTask(reply.Task, reducef)
-			return true
-		} else if reply.Task.TaskType == ExitTask {
-			processExitTask(reply.Task)
-			return true
-		} else if reply.Task.TaskType == NoTask {
-			return false
-		}
-
-	} else {
-		fmt.Printf("call failed!\n")
-	}
-	return true
 }
 func processExitTask(task Task) {
 	//set the worker who is not working as expected as Idle
@@ -126,7 +117,6 @@ func processReduceTask(task Task, reducef func(string, []string) string) {
 func writeReducedOutput(kva []KeyValue, taskId string, reducef func(string, []string) string) {
 	oname := fmt.Sprintf("mr-out-%v", taskId)
 	ofile, _ := os.Create(oname)
-	kvraft.DPrintf("Have reached hereeeeee")
 	defer ofile.Close()
 	//
 	// call Reduce on each distinct key in intermediate[],
@@ -141,10 +131,8 @@ func writeReducedOutput(kva []KeyValue, taskId string, reducef func(string, []st
 		values := []string{}
 		for k := i; k < j; k++ {
 			values = append(values, kva[k].Value)
-
 		}
 		output := reducef(kva[i].Key, values)
-
 		fmt.Fprintf(ofile, "%v %v\n", kva[i].Key, output)
 
 		i = j
@@ -155,7 +143,7 @@ func processMapTask(task Task, mapf func(string, string) []KeyValue) {
 	filename := task.Filename
 	file, err := os.Open(filename)
 	if err != nil {
-		log.Fatalf("cannot open %v", filename)
+		log.Fatalf("cannot open %v", task)
 		return
 	}
 	content, err := ioutil.ReadAll(file)
@@ -187,7 +175,7 @@ func reportTask(task Task) {
 		}
 
 	} else {
-		fmt.Printf("call failed!\n")
+		fmt.Printf("call failure %v!\n")
 	}
 }
 
@@ -199,8 +187,9 @@ func mapWriteToTemp(kva []KeyValue, mapId int) {
 	prefix := fmt.Sprintf("%v/mr", TempDir)
 
 	for i := 0; i < nReduce; i++ {
-		suffix := fmt.Sprintf("%v-%v", mapId, i)
-		file, err := os.CreateTemp(TempDir, suffix)
+
+		newFilePath := fmt.Sprintf("%v-%v", prefix, i)
+		file, err := openFileAppendOrCreate(newFilePath)
 		if err != nil {
 			fmt.Printf("Cannot create file %v due to : \n ", i)
 			fmt.Println(err)
@@ -227,46 +216,26 @@ func mapWriteToTemp(kva []KeyValue, mapId int) {
 		}
 	}
 
-	for i, file := range files {
+	for _, file := range files {
 		err := file.Close()
 		if err != nil {
 			log.Fatalf("error closing file : %v\n", file.Name())
 		}
-		newFilePath := fmt.Sprintf("%v-%v", prefix, i)
-		newErr := os.Rename(file.Name(), newFilePath)
-		if newErr != nil {
-			log.Fatalf("error renaming file : %v\n", file.Name())
-
-		}
 	}
+}
+
+func openFileAppendOrCreate(filePath string) (*os.File, error) {
+	// Open the file in append mode. If it doesn't exist, create it.
+	file, err := os.OpenFile(filePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0666)
+	if err != nil {
+		return nil, err
+	}
+	return file, nil
 }
 
 // example function to show how to make an RPC call to the coordinator.
 //
 // the RPC argument and reply types are defined in rpc.go.
-func CallExample() {
-
-	// declare an argument structure.
-	args := ExampleArgs{}
-
-	// fill in the argument(s).
-	args.X = 99
-
-	// declare a reply structure.
-	reply := ExampleReply{}
-
-	// send the RPC request, wait for the reply.
-	// the "Coordinator.Example" tells the
-	// receiving server that we'd like to call
-	// the Example() method of struct Coordinator.
-	ok := call("Coordinator.Example", &args, &reply)
-	if ok {
-		// reply.Y should be 100.
-		fmt.Printf("reply.Y %v\n", reply.Y)
-	} else {
-		fmt.Printf("call failed!\n")
-	}
-}
 
 // send an RPC request to the coordinator, wait for the response.
 // usually returns true.
@@ -274,6 +243,11 @@ func CallExample() {
 func call(rpcname string, args interface{}, reply interface{}) bool {
 	// c, err := rpc.DialHTTP("tcp", "127.0.0.1"+":1234")
 	sockname := coordinatorSock()
+	if _, err := os.Stat(sockname); os.IsNotExist(err) {
+		log.Printf("Socket file %s was not created\n", sockname)
+	} else {
+		log.Printf("Socket file %s created successfully\n", sockname)
+	}
 	c, err := rpc.DialHTTP("unix", sockname)
 	if err != nil {
 		log.Fatal("dialing:", err)

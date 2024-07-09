@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"github.com/golang-collections/collections/set"
 	"log"
+	"path/filepath"
 	"strconv"
 	"sync"
 	"time"
@@ -25,9 +26,10 @@ type Coordinator struct {
 }
 
 const workerTimeout = 10
+const TempDir = "tmp"
 
-var mapTaskSet = set.Set{}
-var reduceTaskSet = set.Set{}
+var mapTaskSet = set.New()
+var reduceTaskSet = set.New()
 
 type Task struct {
 	WorkerId   int
@@ -55,6 +57,7 @@ const (
 func (c *Coordinator) RequestTask(args *WorkerArgs, reply *WorkerReply) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
+	log.Printf("dekh dekh : mapf : %v ,,,, reducef : %v", c.mMapTasks, c.nReduceTasks)
 	task := Task{}
 	if c.mMapTasks > 0 {
 		kvraft.DPrintf("Map task started")
@@ -93,7 +96,13 @@ func (c *Coordinator) RequestTask(args *WorkerArgs, reply *WorkerReply) error {
 			return nil
 		}
 	} else if c.mMapTasks == 0 && c.nReduceTasks == 0 {
-		c.tasksCompleted = true
+		task = Task{
+			WorkerId: args.WorkerId,
+			TaskType: ExitTask,
+			Filename: "",
+			TaskId:   strconv.Itoa(0),
+		}
+		reply.Task = task
 		return nil
 	}
 
@@ -104,11 +113,11 @@ func (c *Coordinator) monitorTask(task Task) {
 	time.Sleep(time.Second * workerTimeout)
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if task.TaskType == MapTask && mapTaskSet.Has(task.TaskId) {
+	if task.TaskType == MapTask && !mapTaskSet.Has(task.TaskId) {
 		task.TaskStatus = Idle
 		c.mapTasks = append(c.mapTasks, task)
 		c.mMapTasks++
-	} else if task.TaskType == ReduceTask && reduceTaskSet.Has(task.TaskId) {
+	} else if task.TaskType == ReduceTask && !reduceTaskSet.Has(task.TaskId) {
 		task.TaskStatus = Idle
 		c.reduceTasks = append(c.reduceTasks, task)
 		c.nReduceTasks++
@@ -158,11 +167,7 @@ func (c *Coordinator) server() {
 	rpc.HandleHTTP()
 	//l, e := net.Listen("tcp", ":1234")
 	sockname := coordinatorSock()
-	kvraft.DPrintf("here")
-	err := os.Remove(sockname)
-	if err != nil {
-		return
-	}
+	os.Remove(sockname)
 	l, e := net.Listen("unix", sockname)
 	if e != nil {
 		log.Fatal("listen error:", e)
@@ -176,7 +181,10 @@ func (c *Coordinator) server() {
 func (c *Coordinator) Done() bool {
 
 	// Your code here.
-	return c.tasksCompleted
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	return c.mMapTasks == 0 && c.nReduceTasks == 0
 }
 
 type ByKey []KeyValue
@@ -203,5 +211,20 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 		c.reduceTasks = append(c.reduceTasks, Task{Filename: strconv.Itoa(i), TaskType: ReduceTask, TaskId: strconv.Itoa(i)})
 	}
 	c.server()
+	outFiles, _ := filepath.Glob("mr-out*")
+	for _, f := range outFiles {
+		if err := os.Remove(f); err != nil {
+			log.Fatalf("Cannot remove file %v\n", f)
+		}
+	}
+	err := os.RemoveAll(TempDir)
+	if err != nil {
+		log.Fatalf("Cannot remove temp directory %v\n", TempDir)
+	}
+	err = os.Mkdir(TempDir, 0755)
+	if err != nil {
+		log.Fatalf("Cannot create temp directory %v\n", TempDir)
+	}
+
 	return &c
 }
