@@ -1,7 +1,6 @@
 package mr
 
 import (
-	"6.824/kvraft"
 	"fmt"
 	"log"
 	"path/filepath"
@@ -51,7 +50,6 @@ const (
 // Your code here -- RPC handlers for the worker to call.
 func (c *Coordinator) RequestTask(args *WorkerArgs, reply *WorkerReply) error {
 	c.mu.Lock()
-	log.Printf("dekh dekh : mapf : %v %v,,,, reducef : %v %v", c.mMapTasks, len(c.mapTasks), c.nReduceTasks, len(c.reduceTasks))
 	task := Task{}
 	task.WorkerId = args.WorkerId
 	if c.mMapTasks > 0 {
@@ -91,11 +89,9 @@ func (c *Coordinator) monitorTask(task Task) {
 	defer c.mu.Unlock()
 
 	if task.TaskType == MapTask && c.mapTasks[task.TaskId].TaskStatus == In_Progress {
-		log.Printf("dhoom machale dhoom : %v", task)
 		c.mapTasks[task.TaskId].TaskStatus = Idle
 		task.WorkerId = ""
 	} else if task.TaskType == ReduceTask && c.reduceTasks[task.TaskId].TaskStatus == In_Progress {
-		log.Printf("dhoom machale dhoom : %v", task)
 		c.reduceTasks[task.TaskId].TaskStatus = Idle
 		task.WorkerId = ""
 	}
@@ -203,7 +199,6 @@ func MakeCoordinator(files []string, nReduce int) *Coordinator {
 	// Your code here
 	c.nReduceTasks = nReduce
 	c.mMapTasks = len(files)
-	kvraft.DPrintf("note it %v-%v", nReduce, c.mMapTasks)
 	for i := 0; i < len(files); i++ {
 		c.mapTasks = append(c.mapTasks, Task{Filename: files[i], TaskType: MapTask, TaskId: i})
 	}
